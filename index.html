@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Калькулятор СМО</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#faf6f6;--card:#fff;--tx:#2a2222;--mu:#6b5f5f;--ac:#b8434f;--br:#e6d6d6;--wb:#fff3cd;--wt:#664d03;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1717;--card:#272020;--tx:#f1e8e8;--mu:#a89a9a;--ac:#e06a76;--br:#3d3232;--wb:#3d3416;--wt:#f3dc8a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1c1717;--card:#272020;--tx:#f1e8e8;--mu:#a89a9a;--ac:#e06a76;--br:#3d3232;--wb:#3d3416;--wt:#f3dc8a;color-scheme:dark}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:0 0 12px}
+section{background:var(--card);border:1px solid var(--br);border-radius:12px;padding:14px;margin-bottom:12px}
+h2{font-size:1rem;margin:0 0 10px;color:var(--ac)}
+label{display:block;font-weight:600;margin:10px 0 4px}
+select,input,button{width:100%;font:inherit;padding:10px;border-radius:8px;border:1px solid var(--br);background:var(--bg);color:var(--tx)}
+.row{display:grid;grid-template-columns:1fr 110px;gap:8px}
+button{background:var(--ac);color:#fff;border:0;font-weight:600;margin-top:14px;cursor:pointer}
+.d{color:var(--mu);font-size:.9rem;margin:8px 0 0}
+.w{background:var(--wb);color:var(--wt);border-radius:8px;padding:10px;margin-bottom:12px}
+.e{color:var(--ac);font-weight:600;margin-top:8px}
+.sc{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+td,th{padding:7px 6px;border-bottom:1px solid var(--br);text-align:left;vertical-align:top}
+td.v{font-weight:700;white-space:nowrap}
+td.f{color:var(--mu);font-size:.82rem}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Калькулятор СМО</h1>
+<section>
+<h2>1. Тип СМО</h2>
+<select id="type"></select>
+<p class="d" id="desc"></p>
+</section>
+<section>
+<h2>2. Исходные данные</h2>
+<label for="unit">Единица времени</label>
+<input id="unit" value="ч">
+<label>Входной поток заявок</label>
+<div class="row"><select id="lm"><option value="r">Интенсивность λ</option><option value="t">Среднее время между заявками</option></select><input id="l" type="number" inputmode="decimal" step="any" value="10"></div>
+<label>Поток обслуживания</label>
+<div class="row"><select id="mm"><option value="r">Интенсивность μ</option><option value="t">Среднее время обслуживания</option></select><input id="m" type="number" inputmode="decimal" step="any" value="15"></div>
+<div id="pn"><label for="n">Число каналов n</label><input id="n" type="number" inputmode="numeric" value="2"></div>
+<div id="pq"><label for="q">Максимум мест в очереди m</label><input id="q" type="number" inputmode="numeric" value="3"></div>
+<div id="pp"><label>«Терпение» заявок</label>
+<div class="row"><select id="nm"><option value="t">Среднее время ожидания</option><option value="r">Интенсивность ухода ν</option></select><input id="nu" type="number" inputmode="decimal" step="any" value="0.1"></div></div>
+<button id="go">Рассчитать</button>
+<div class="e" id="err"></div>
+<p class="d" id="conv"></p>
+</section>
+<div id="out" hidden>
+<div class="w" id="warn" hidden></div>
+<section><h2>3. Характеристики эффективности</h2><div class="sc"><table id="rt"></table></div></section>
+<section><h2>Предельные вероятности состояний</h2><div class="sc"><table id="st"></table></div></section>
+<button id="xl">Экспорт в Excel</button>
+<div class="e" id="xe"></div>
+</div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+let last=null;
+const T=[
+["sr","Одноканальная СМО с отказами","Один канал, мест в очереди нет. Заявка, заставшая канал занятым, получает отказ.",""],
+["mr","Многоканальная СМО с отказами (задача Эрланга)","n каналов, очереди нет. Заявка, заставшая все каналы занятыми, покидает систему.","n"],
+["su","Одноканальная СМО с неограниченной очередью","Один канал, очередь не ограничена. Стационарный режим существует при ρ = λ/μ < 1.",""],
+["mu","Многоканальная СМО с неограниченной очередью","n каналов, очередь не ограничена. Стационарный режим существует при ρ/n < 1.","n"],
+["sl","Одноканальная СМО с ограниченной очередью","Один канал, в очереди не более m заявок. При заполненной очереди заявка получает отказ.","q"],
+["ml","Многоканальная СМО с ограниченной очередью","n каналов, в очереди не более m заявок. При заполненной очереди заявка получает отказ.","nq"],
+["fx","Одноканальная СМО с фиксированным временем обслуживания","Один канал, очередь не ограничена, время обслуживания постоянно и равно 1/μ (система M/D/1). Нужно ρ < 1.",""],
+["im","СМО с ограниченным временем ожидания («нетерпеливые» заявки)","n каналов, очередь не ограничена по длине, но заявка уходит, если ждёт дольше случайного времени (интенсивность ухода ν = 1/t_ож).","np"]];
+const $=id=>document.getElementById(id);
+const F=x=>{if(!isFinite(x))return"—";if(x!==0&&Math.abs(x)<1e-4)return x.toExponential(3).replace(".",",");return(+x.toFixed(5)).toString().replace(".",",")};
+T.forEach(t=>{const o=document.createElement("option");o.value=t[0];o.textContent=t[1];$("type").appendChild(o)});
+function sync(){const t=T.find(x=>x[0]===$("type").value);$("desc").textContent=t[2];
+$("pn").hidden=!t[3].includes("n");$("pq").hidden=!t[3].includes("q");$("pp").hidden=!t[3].includes("p");}
+$("type").onchange=sync;sync();
+const norm=w=>{const s=w.reduce((a,b)=>a+b,0);return w.map(x=>x/s)};
+function calc(ty,l,mu,n,m,nu,u){
+const R=[],S=[];let warn="";const add=(a,b,c)=>R.push([a,F(b),c]);
+const rho=l/mu;
+const states=(p,inf)=>{p.slice(0,30).forEach((x,k)=>S.push(["S"+k,F(x)]));if(p.length>30||inf)S.push(["…","показаны первые 30"])};
+const refusal=n=>{const w=[1];for(let k=1;k<=n;k++)w.push(w[k-1]*rho/k);const p=norm(w),pr=p[n],q=1-pr,a=l*q,b=a/mu;
+add("Приведённая интенсивность потока ρ",rho,"ρ = λ / μ");add("Вероятность простоя p₀",p[0],"p₀ = 1 / Σ (ρᵏ/k!)");
+add("Вероятность отказа P_отк",pr,"P_отк = pₙ");add("Относительная пропускная способность Q",q,"Q = 1 − P_отк");
+add("Абсолютная пропускная способность A, заявок/"+u,a,"A = λ·Q");add("Среднее число занятых каналов",b,"k̄ = A / μ");
+add("Среднее число свободных каналов",n-b,"n − k̄");add("Коэффициент загрузки",b/n,"k̄ / n");states(p)};
+const unl=n=>{const chi=rho/n;add("Приведённая интенсивность потока ρ",rho,"ρ = λ / μ");if(n>1)add("Загрузка на один канал ρ/n",chi,"χ = ρ / n");
+if(chi>=1){warn="Условие стационарности не выполняется (ρ/n ≥ 1): очередь неограниченно растёт, предельные вероятности не существуют. Увеличьте μ или число каналов.";return}
+let term=1,sum=1;for(let k=1;k<=n;k++){term*=rho/k;sum+=term}const wn=term;sum+=wn*rho/(n-rho);const p0=1/sum;
+const pw=wn/(1-chi)*p0,lq=wn*chi/((1-chi)**2)*p0,ls=lq+rho;
+add("Вероятность простоя p₀",p0,"p₀ = [Σ ρᵏ/k! + ρⁿ⁺¹/(n!(n−ρ))]⁻¹");add("Вероятность отказа P_отк",0,"очередь не ограничена");
+add("Вероятность ожидания P_ож",pw,"P_ож = ρⁿ/(n!(1−ρ/n))·p₀");add("Средняя длина очереди L_оч",lq,"L_оч = ρⁿ⁺¹·p₀ / (n·n!·(1−ρ/n)²)");
+add("Среднее число заявок в системе L_сист",ls,"L_сист = L_оч + ρ");add("Среднее время ожидания в очереди, "+u,lq/l,"t_оч = L_оч / λ");
+add("Среднее время в системе, "+u,ls/l,"t_сист = L_сист / λ");add("Среднее число занятых каналов",rho,"k̄ = ρ");
+add("Коэффициент загрузки",chi,"ρ / n");add("Абсолютная пропускная способность A, заявок/"+u,l,"A = λ");
+const p=[];let w=1;for(let k=0;k<30;k++){if(k>0)w*=rho/Math.min(k,n);p.push(w*p0)}states(p,true)};
+const lim=(n,m)=>{const w=[1];for(let k=1;k<=n+m;k++)w.push(w[k-1]*rho/Math.min(k,n));const p=norm(w),pr=p[n+m],q=1-pr,a=l*q,b=a/mu;
+let lq=0;for(let s=1;s<=m;s++)lq+=s*p[n+s];let pw=0;for(let k=n;k<n+m;k++)pw+=p[k];const ls=lq+b;
+add("Приведённая интенсивность потока ρ",rho,"ρ = λ / μ");add("Вероятность простоя p₀",p[0],"p₀ = [Σ ρᵏ/k! + (ρⁿ/n!)·Σ (ρ/n)ˢ]⁻¹");
+add("Вероятность отказа P_отк",pr,"P_отк = p_{n+m}");add("Относительная пропускная способность Q",q,"Q = 1 − P_отк");
+add("Абсолютная пропускная способность A, заявок/"+u,a,"A = λ·Q");add("Вероятность ожидания",pw,"Σ pₖ, k = n..n+m−1");
+add("Средняя длина очереди L_оч",lq,"L_оч = Σ s·p_{n+s}");add("Среднее число занятых каналов",b,"k̄ = A / μ");
+add("Среднее число заявок в системе L_сист",ls,"L_сист = L_оч + k̄");add("Среднее время ожидания в очереди, "+u,lq/a,"t_оч = L_оч / A");
+add("Среднее время в системе, "+u,ls/a,"t_сист = L_сист / A");add("Коэффициент загрузки",b/n,"k̄ / n");states(p)};
+switch(ty){
+case"sr":refusal(1);break;case"mr":refusal(n);break;case"su":unl(1);break;case"mu":unl(n);break;
+case"sl":lim(1,m);break;case"ml":lim(n,m);break;
+case"fx":{add("Приведённая интенсивность потока ρ",rho,"ρ = λ / μ");
+if(rho>=1){warn="Условие стационарности не выполняется (ρ ≥ 1): очередь неограниченно растёт.";break}
+const lq=rho*rho/(2*(1-rho)),ls=lq+rho,wq=lq/l;
+add("Вероятность простоя p₀",1-rho,"p₀ = 1 − ρ");add("Вероятность отказа P_отк",0,"очередь не ограничена");add("Вероятность ожидания P_ож",rho,"P_ож = ρ");
+add("Средняя длина очереди L_оч",lq,"L_оч = ρ² / (2(1 − ρ))");add("Среднее число заявок в системе L_сист",ls,"L_сист = L_оч + ρ");
+add("Среднее время ожидания в очереди, "+u,wq,"t_оч = L_оч / λ");add("Среднее время в системе, "+u,wq+1/mu,"t_сист = t_оч + 1/μ");
+add("Коэффициент загрузки",rho,"ρ");add("Абсолютная пропускная способность A, заявок/"+u,l,"A = λ");
+warn="Для постоянного времени обслуживания распределение вероятностей состояний не показательное и здесь не выводится; средняя длина очереди в 2 раза меньше, чем для M/M/1.";break}
+case"im":{const w=[1];let sum=1;for(let k=1;k<2e6;k++){const d=k<=n?k*mu:n*mu+(k-n)*nu;const x=w[k-1]*l/d;w.push(x);sum+=x;if(k>n&&x<1e-18*sum)break}
+const p=norm(w);let lq=0,pw=0;for(let k=n+1;k<p.length;k++)lq+=(k-n)*p[k];for(let k=n;k<p.length;k++)pw+=p[k];
+const pr=nu*lq/l,a=l-nu*lq,b=a/mu,ls=lq+b;
+add("Приведённая интенсивность потока ρ",rho,"ρ = λ / μ");add("Интенсивность ухода ν, 1/"+u,nu,"ν = 1 / t_ож");add("Вероятность простоя p₀",p[0],"p₀ = [1 + Σ ∏ λ/(min(i,n)μ + max(0,i−n)ν)]⁻¹");
+add("Вероятность ожидания P_ож",pw,"Σ pₖ, k ≥ n");add("Вероятность отказа (уход) P_отк",pr,"P_отк = ν·L_оч / λ");add("Относительная пропускная способность Q",1-pr,"Q = 1 − P_отк");
+add("Абсолютная пропускная способность A, заявок/"+u,a,"A = λ·Q");add("Средняя длина очереди L_оч",lq,"L_оч = Σ s·p_{n+s}");add("Среднее число занятых каналов",b,"k̄ = A / μ");
+add("Среднее число заявок в системе L_сист",ls,"L_сист = L_оч + k̄");add("Среднее время ожидания в очереди, "+u,lq/l,"t_оч = L_оч / λ");
+add("Среднее время в системе, "+u,ls/l,"t_сист = L_сист / λ");add("Коэффициент загрузки",b/n,"k̄ / n");states(p,true)}}
+return{R,S,warn}}
+function tbl(el,head,rows){el.innerHTML="<tr>"+head.map(h=>"<th>"+h+"</th>").join("")+"</tr>"+rows.map(r=>"<tr>"+r.map((c,i)=>`<td class="${head.length==3?["","v","f"][i]:i?"v":""}">${c}</td>`).join("")+"</tr>").join("")}
+$("go").onclick=()=>{
+const err=$("err");err.textContent="";
+const num=(id,name)=>{const v=parseFloat($(id).value.replace(",","."));if(!(v>0)){err.textContent="Поле «"+name+"» должно быть положительным числом.";return null}return v};
+const int=(id,name,min)=>{const v=parseInt($(id).value,10);if(!(v>=min)){err.textContent="Поле «"+name+"» должно быть целым числом не меньше "+min+".";return null}return v};
+const ty=$("type").value,t=T.find(x=>x[0]===ty);
+let l=num("l","Входной поток");if(l===null)return;let mu=num("m","Поток обслуживания");if(mu===null)return;
+let n=1,m=0,nu=0;
+if(t[3].includes("n")){n=int("n","Число каналов n",1);if(n===null)return}
+if(t[3].includes("q")){m=int("q","Максимум мест в очереди m",1);if(m===null)return}
+if(t[3].includes("p")){nu=num("nu","Терпение заявок");if(nu===null)return;if($("nm").value==="t")nu=1/nu}
+if($("lm").value==="t")l=1/l;if($("mm").value==="t")mu=1/mu;
+const u=$("unit").value.trim()||"ед. времени";
+$("conv").textContent="λ = "+F(l)+" заявок/"+u+"; μ = "+F(mu)+" обслуживаний/"+u+(nu?"; ν = "+F(nu)+" 1/"+u:"");
+const r=calc(ty,l,mu,n,m,nu,u);last={t:t[1],l,mu,n,m,nu,u,r};
+$("out").hidden=false;$("warn").hidden=!r.warn;$("warn").textContent=r.warn;
+tbl($("rt"),["Характеристика","Значение","Формула"],r.R);
+$("st").parentElement.parentElement.hidden=!r.S.length;
+tbl($("st"),["Состояние","Вероятность p"],r.S);
+$("out").scrollIntoView({behavior:"smooth"})};
+const cv=v=>{const x=parseFloat(String(v).replace(",","."));return isFinite(x)&&/^[-\d]/.test(v)?x:v};
+$("xl").onclick=async()=>{
+const xe=$("xe");xe.textContent="";
+if(!last){return}
+if(typeof XLSX==="undefined"){xe.textContent="Не удалось загрузить модуль Excel. Проверьте интернет и обновите страницу.";return}
+const d=last,wb=XLSX.utils.book_new();
+const p=[["Тип СМО",d.t],["Единица времени",d.u],["λ (интенсивность потока)",d.l],["μ (интенсивность обслуживания)",d.mu]];
+if(T.find(x=>x[1]===d.t)[3].includes("n"))p.push(["Число каналов n",d.n]);
+if(T.find(x=>x[1]===d.t)[3].includes("q"))p.push(["Мест в очереди m",d.m]);
+if(d.nu)p.push(["ν (интенсивность ухода)",d.nu]);
+if(d.r.warn)p.push([],["Примечание",d.r.warn]);
+const s1=XLSX.utils.aoa_to_sheet(p);s1["!cols"]=[{wch:34},{wch:60}];XLSX.utils.book_append_sheet(wb,s1,"Исходные данные");
+const s2=XLSX.utils.aoa_to_sheet([["Характеристика","Значение","Формула"],...d.r.R.map(r=>[r[0],cv(r[1]),r[2]])]);s2["!cols"]=[{wch:55},{wch:14},{wch:60}];XLSX.utils.book_append_sheet(wb,s2,"Характеристики");
+if(d.r.S.length){const s3=XLSX.utils.aoa_to_sheet([["Состояние","Вероятность p"],...d.r.S.map(r=>[r[0],cv(r[1])])]);s3["!cols"]=[{wch:14},{wch:30}];XLSX.utils.book_append_sheet(wb,s3,"Вероятности");}
+const buf=XLSX.write(wb,{bookType:"xlsx",type:"array"}),name="CMO_Result.xlsx";
+try{
+let dl=null;try{dl=await claude.use("downloads")}catch(e){}
+if(dl){await dl.save({filename:name,data:new Uint8Array(buf)});}
+else{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));a.download=name;document.body.appendChild(a);a.click();a.remove();}
+}catch(e){if(!e||e.code!=="declined")xe.textContent="Не удалось сохранить файл.";}
+};
+</script>
+</body>
+</html>
